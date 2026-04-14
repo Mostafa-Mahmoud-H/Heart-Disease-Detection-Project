@@ -7,7 +7,7 @@ This report provides a detailed evaluation of the **Heart Disease Detection Syst
 
 | Metric | Machine Learning (Decision Tree) | Rule-Based System (Experta) |
 | :--- | :--- | :--- |
-| **Accuracy** | **81%** | **19%** |
+| **Accuracy** | **81%** | **37%** |
 | **Precision** | 0.7241 | N/A (Rule-driven) |
 | **Recall (Sensitivity)** | 0.7241 | N/A (Rule-driven) |
 | **F1-Score** | 0.7241 | N/A (Rule-driven) |
