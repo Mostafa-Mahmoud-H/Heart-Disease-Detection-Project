@@ -1,83 +1,94 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from Utils.data_processing import Data_Preprocessor
 import pandas as pd
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import RobustScaler , OneHotEncoder
-from sklearn.pipeline import Pipeline
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import train_test_split
-import joblib
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+import joblib
+
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder , RobustScaler
+from sklearn.pipeline import Pipeline
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
+
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from Utils.data_processing import Data_Preprocessor
 
 def train():
-    Raw_Data_Path=r"D:\College\Semmester_6\IntelligentProgramming\Assignment_2\Heart Disease Detection Project\Data\RawData\heart.csv" 
-    df=pd.read_csv(Raw_Data_Path)
-    preprocessor=Data_Preprocessor(df)
-    cleaned_Data=preprocessor.cleaning(df)
-    preprocessor.save_cleaned_data(cleaned_Data)
-    
-    x=cleaned_Data.drop('target',axis=1)
-    y=cleaned_Data['target']
-    
-    cat_cols = preprocessor.categorical_columns
-    num_cols = preprocessor.continuous_columns
-    
-    Preprocessor_transformer=ColumnTransformer([
-        ('scale',RobustScaler() , num_cols),
-        ('encode',OneHotEncoder(drop='first', sparse_output=False),cat_cols)
-    ] ,remainder='passthrough',
-       verbose_feature_names_out=False                                        
-    ) 
-    
-    
-    model_pipeline = Pipeline(steps=[
-        ('preprocessor',Preprocessor_transformer),
-        ('classifier', DecisionTreeClassifier(max_depth=5, min_samples_split=10, random_state=42))
-    ])
-    
-    X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42) 
-    model_pipeline.fit(X_train, y_train)
+    Raw_Data_Path = "data/RawData/heart.csv" 
+    if not os.path.exists(Raw_Data_Path):
+        print(f"Error: File not found at {Raw_Data_Path}")
+        return
 
+    df = pd.read_csv(Raw_Data_Path)
+    preprocessor_tool = Data_Preprocessor(df)
+    cleaned_data = preprocessor_tool.cleaning(df)
+    preprocessor_tool.save_cleaned_data(cleaned_data)
     
-    y_pred = model_pipeline.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)       
-    f1 = f1_score(y_test, y_pred)              
+
+    X = cleaned_data.drop('target', axis=1)
+    y = cleaned_data['target']
     
-    print(f" Accuracy (Overall):  {accuracy*100}) %")
-    print(f" Precision:           {precision:.4f}")
-    print(f" Recall (Sensitivity): {recall:.4f}")
-    print(f" F1-Score:            {f1:.4f}")
+    cat_cols = preprocessor_tool.categorical_columns
+    num_cols = preprocessor_tool.continuous_columns
     
-    print("\n Detailed Classification Report:")
+
+    preprocessor_transformer = ColumnTransformer([
+        ('scale', MinMaxScaler(), num_cols),
+        ('encode', OneHotEncoder(drop='first', sparse_output=False), cat_cols)
+    ], remainder='passthrough')
+
+    model_pipeline = Pipeline([
+        ('preprocessor', preprocessor_transformer),
+        ('model', DecisionTreeClassifier(random_state=42))
+    ])
+
+    print("Starting Hyperparameter Tuning...")
+    param_grid = {
+        'model__max_depth': [3, 5, 7, 10, None],
+        'model__min_samples_split': [2, 5, 10],
+        'model__criterion': ['gini', 'entropy']
+    }
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    grid_search = GridSearchCV(model_pipeline, param_grid, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    
+
+    best_model = grid_search.best_estimator_
+    print(f"Best Parameters found: {grid_search.best_params_}")
+
+
+    y_pred = best_model.predict(X_test)
+    print("\n--- Model Evaluation Metrics ---")
+    print(f"Accuracy:  {accuracy_score(y_test, y_pred)*100:.2f}%")
     print(classification_report(y_test, y_pred))
 
-    print("\n Confusion Matrix:")
-    cm = confusion_matrix(y_test, y_pred)
-    print(cm)
-    print("="*30)
-    cm=confusion_matrix(y_test , y_pred) 
-    plt.figure(figsize=(8,6))
-    sns.heatmap(cm ,annot=True ,cmap='Blues' ,fmt='d' , xticklabels=['No Disease', 'Disease'] , yticklabels=['No Disease', 'Disease'])    
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.title('Confusion Matrix - Diabetes Prediction')
-    os.makedirs("Reports" ,exist_ok=True)
-    plt.savefig(r"Reports\ConfusionMatrix.png")
-    print("Saved")
+
+    print("\nGenerating Feature Importance Plot...")
+    encoded_cat_names = best_model.named_steps['preprocessor'].named_transformers_['encode'].get_feature_names_out(cat_cols)
+    all_feature_names = num_cols + list(encoded_cat_names) + [col for col in X.columns if col not in num_cols + cat_cols]
+
+    importances = best_model.named_steps['model'].feature_importances_
+    feat_importances = pd.Series(importances, index=all_feature_names)
+    
+    plt.figure(figsize=(10, 6))
+    feat_importances.nlargest(10).plot(kind='barh', color='skyblue')
+    plt.title('Top 10 Important Features (Decision Tree)')
+    plt.xlabel('Relative Importance')
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
     plt.show()
 
-    os.makedirs('ml_model/saved_models', exist_ok=True)
-    joblib.dump(model_pipeline, 'ml_model/saved_models/heart_disease_pipeline.pkl')
-    
-    print("Full Pipeline saved successfully.")
-    return train
+
+    model_dir = os.path.join('ml_model', 'saved_models')
+    os.makedirs(model_dir, exist_ok=True)
+    save_path = os.path.join(model_dir, 'heart_disease_pipeline.pkl')
+    joblib.dump(best_model, save_path)
+    print(f"Model saved successfully at: {save_path}")
 
 if __name__ == "__main__":
     train()
-    
